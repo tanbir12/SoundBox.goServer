@@ -68,7 +68,7 @@ func controlHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Define the topic
-	topic := "esp32/led"
+	topic := "soundbox@tanbir@1001"
 	// Publish the message to the MQTT topic
 	token := mqttClient.Publish(topic, 1, false, led)
 	token.Wait()
