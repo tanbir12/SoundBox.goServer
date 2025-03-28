@@ -5,24 +5,25 @@ import (
 	"crypto/x509"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
-	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
+	"github.com/gorilla/mux"
 )
+
+var mqttClient mqtt.Client
 
 func main() {
 	// Broker, credentials, and topic
 	broker := "ssl://3c07990e59c44be0afbc193bdbf9af31.s1.eu.hivemq.cloud:8883"
 	username := "pradhantanbir"
 	password := "Tanbir123"
-	topic := "esp32/led"
-	payload := "ON" // Message to publish
+	caCertPath := "ca.crt" // Path to your CA certificate file
 
 	// Load CA certificate
 	certpool := x509.NewCertPool()
-	caCertPath := "ca.crt"                 // Path to your CA certificate file
-	caCert, err := os.ReadFile(caCertPath) // Use os.ReadFile instead of ioutil.ReadFile
+	caCert, err := os.ReadFile(caCertPath) // Use os.ReadFile
 	if err != nil {
 		log.Fatalf("Failed to read CA certificate: %v", err)
 	}
@@ -36,25 +37,46 @@ func main() {
 	// Configure MQTT client options
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(broker)
-	opts.SetClientID("GoClient")
+	opts.SetClientID("GoServerClient")
 	opts.SetUsername(username)
 	opts.SetPassword(password)
 	opts.SetTLSConfig(tlsConfig)
 
-	// Create and start MQTT client
-	client := mqtt.NewClient(opts)
-	if token := client.Connect(); token.Wait() && token.Error() != nil {
+	// Create and connect the MQTT client
+	mqttClient = mqtt.NewClient(opts)
+	if token := mqttClient.Connect(); token.Wait() && token.Error() != nil {
 		log.Fatalf("Error connecting to broker: %v", token.Error())
 	}
 	fmt.Println("Connected to HiveMQ Cloud")
 
-	// Publish a message to the topic
-	token := client.Publish(topic, 1, false, payload)
-	token.Wait()
-	fmt.Printf("Message '%s' published to topic '%s'\n", payload, topic)
+	// Set up Gorilla Mux router
+	r := mux.NewRouter()
+	r.HandleFunc("/api/payment", controlHandler).Methods("GET")
 
-	// Disconnect client
-	time.Sleep(2 * time.Second)
-	client.Disconnect(250)
-	fmt.Println("Disconnected from HiveMQ Cloud")
+	// Start the server
+	fmt.Println("Server is running on port 8080...")
+	log.Fatal(http.ListenAndServe(":8080", r))
+}
+
+// Handler function for the API endpoint
+func controlHandler(w http.ResponseWriter, r *http.Request) {
+	// Get the "led" query parameter
+	led := r.URL.Query().Get("amount")
+	if led == "" {
+		http.Error(w, "Missing 'led' parameter", http.StatusBadRequest)
+		return
+	}
+
+	// Define the topic
+	topic := "esp32/led"
+	// Publish the message to the MQTT topic
+	token := mqttClient.Publish(topic, 1, false, led)
+	token.Wait()
+	if token.Error() != nil {
+		http.Error(w, "Failed to publish message to MQTT broker", http.StatusInternalServerError)
+		return
+	}
+
+	// Send response to the client
+	fmt.Fprintf(w, "Message '%s' published to topic '%s'\n", led, topic)
 }
